@@ -1,0 +1,1766 @@
+---
+title: "Predictive-analysis-of-in-hospital-mortality-in-patients-with-ovarian-cancer"
+author:
+  - name: "Luna"
+    email: "n@miuandes.cl"
+    orcid: "0000-0001-7336-1833"
+  - name: "Amaru Simón Agüero Jiménez"
+    email: "aaguero@miuandes.cl"
+    orcid: "0000-0001-7336-1833"
+date: "today"
+format:
+  html:
+    smooth-scroll: true #smooth mouse scroll
+    toc: true #table of contents
+    toc-depth: 6 #table of contents depth
+    toc-location: right #table of contents location
+    number-sections: true #section numbering according to table of contents
+    number-depth: 6 #numbering depth
+    code-fold: true #fold code cells
+    #bibliography: ref.bib #bibliography file
+    #csl: apa.csl #citation style
+    theme: cosmo #html theme
+    fig-cap-location: bottom #figure caption location (top/bottom)
+execute:
+  warning: false #suppress warnings in chunks
+  message: false #suppress messages in chunks
+  fig-width: 12 #default figure width
+  fig-height: 10 #default figure height
+---
+
+```{r message=FALSE, warning=FALSE}
+install_and_load_packages <- function(packages) {
+  for (package in packages) {
+    if (!require(package, character.only = TRUE)) {
+      install.packages(package)
+      library(package, character.only = TRUE)
+    }
+  }
+}
+
+necessary_packages <- c("knitr", "tidyverse", "naniar","kableExtra", "DT", "readr", "naniar", "table1", "summarytools","readxl","writexl","scales", "ggrepel")
+
+install_and_load_packages(necessary_packages)
+
+
+opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE)
+
+options(warn = -1)  # Suprime advertencias
+options(readr.show_col_types = FALSE)  # Evita mensajes de `read_csv()`
+```
+
+```{r}
+# Librerías principales
+library(tidyverse)
+library(igraph)
+library(ggraph)
+library(DT)
+library(viridis)
+library(RColorBrewer)
+library(gridExtra)
+library(knitr)
+library(scales)
+
+# Configuración de tema para gráficos
+theme_set(theme_minimal(base_size = 12))
+
+datos <- read.delim(paste0(gsub("/docs", "", getwd()), "/data/brca_metabric_clinical_data.tsv"),
+                    header = TRUE,        # Si la primera fila tiene nombres de columnas
+                    sep = "\t",           # Separador tabulación (por defecto en read.delim)
+                    stringsAsFactors = FALSE,
+                    encoding = "UTF-8")   # Ajusta si usas otro encoding
+```
+
+# Metodología: Análisis de Redes en Cáncer de Mama
+
+## Fuente de Datos y Características del Estudio
+
+### Dataset METABRIC
+Los datos utilizados provienen del estudio Molecular Taxonomy of Breast Cancer International Consortium (METABRIC), un estudio de cohorte retrospectivo que caracteriza molecularmente 2,509 tumores de cáncer de mama primario. El dataset incluye:
+
+- $N = 2{,}509$ pacientes con cáncer de mama invasivo
+- 39 variables clínicas y moleculares
+- Datos de seguimiento a largo plazo (supervivencia y recurrencia)
+- Tres sistemas de clasificación molecular principal:
+  - PAM50 + Claudin-low subtype (7 subtipos)
+  - 3-Gene Classifier (4 subtipos)
+  - Integrative Cluster (11 clusters)
+
+### Variables Analizadas
+Se seleccionaron 22 variables para el análisis de redes, categorizadas en:
+
+**Variables Moleculares:**
+- Subtipo PAM50 (LumA, LumB, Her2, Basal, Normal, claudin-low, NC)
+- Clasificador 3-Gene (ER+/HER2- High Prolif, ER+/HER2- Low Prolif, ER-/HER2-, HER2+)
+- Cluster Integrativo (1-10, 4ER+, 4ER-)
+
+**Receptores Hormonales:**
+- Estado ER (Positive, Negative)
+- Estado PR (Positive, Negative)
+- Estado HER2 (Positive, Negative)
+
+**Características Tumorales:**
+- Grado histológico neoplásico (1, 2, 3)
+- Estadio tumoral (0, 1, 2, 3, 4)
+- Celularidad (Low, Moderate, High)
+- Subtipo histológico (Ductal/NST, Lobular, Mixed, etc.)
+- Tamaño tumoral categorizado (<20mm, 20-30mm, 30-50mm, >50mm)
+- Ganglios linfáticos positivos (N0, N1, N2-3, N>3)
+
+**Tratamiento:**
+- Quimioterapia (YES, NO)
+- Terapia hormonal (YES, NO)
+- Radioterapia (YES, NO)
+- Tipo de cirugía (MASTECTOMY, BREAST CONSERVING)
+
+**Características Demográficas y Clínicas:**
+- Grupo etario al diagnóstico (<40, 40-50, 50-60, 60-70, >70 años)
+- Estado menopáusico inferido (Pre, Post)
+- Lateralidad del tumor primario (Left, Right)
+
+**Desenlaces:**
+- Estado de supervivencia global (LIVING, DECEASED)
+- Estado libre de recurrencia (Not Recurred, Recurred)
+
+---
+
+## Preparación y Procesamiento de Datos
+
+### Limpieza de Datos
+1. **Manejo de valores perdidos:** Los valores NA fueron reemplazados por la categoría "Unknown" para preservar información sobre patrones de datos faltantes.
+
+2. **Estandarización de nombres:** Las variables fueron renombradas para facilitar el manejo programático:
+   - Eliminación de caracteres especiales
+   - Uso de convenciones consistentes
+   - Nombres cortos y descriptivos
+
+3. **Categorización de variables continuas:**
+   - **Edad:** Dividida en quintiles clínicamente relevantes
+   - **Tamaño tumoral:** Categorizada según clasificación T del sistema TNM
+   - **Ganglios linfáticos:** Agrupados según clasificación N
+
+### Transformación de Datos para Análisis de Redes
+Para cada sistema de clasificación molecular (PAM50, 3-Gene, Integrative Cluster), se creó una matriz de características en formato largo:
+
+1. Cada **fila** representa una combinación única de paciente-característica
+2. Cada **característica** se codifica como "Variable: Valor" (ej. "ER: Positive")
+3. Se genera una **matriz binaria** paciente × característica donde:
+   - Valor = 1 si el paciente presenta la característica
+   - Valor = 0 si no la presenta
+   
+   Formalmente: $X \in \{0,1\}^{n \times m}$ donde $n$ = pacientes, $m$ = características
+
+---
+
+## Construcción de Redes de Co-ocurrencia
+
+### Principio Metodológico
+Las redes de co-ocurrencia capturan relaciones entre características clínicas basándose en su tendencia a aparecer juntas en los mismos pacientes. Esta aproximación permite:
+
+- Identificar **patrones de multimorbilidad** molecular y clínica
+- Detectar **asociaciones no obvias** entre características
+- Revelar **estructura modular** en los perfiles clínicos
+
+### Algoritmo de Construcción
+
+**Paso 1: Matriz de Co-ocurrencia**
+
+$$C = X^T \times X$$
+
+Donde:
+- $X$ = matriz binaria ($n$ pacientes × $m$ características)
+- $C$ = matriz de co-ocurrencia ($m \times m$)
+- $C_{ij}$ = número de pacientes que presentan ambas características $i$ y $j$
+
+**Paso 2: Normalización**
+Para corregir por diferencias en frecuencia de características individuales, se aplicó normalización tipo Jaccard:
+
+$$C_{\text{norm}}[i,j] = \frac{C_{ij}}{\sqrt{C_{ii} \times C_{jj}}}$$
+
+Esta normalización produce valores entre 0 y 1, donde:
+- 0 = co-ocurrencia nula
+- 1 = co-ocurrencia perfecta
+
+**Paso 3: Filtrado de Aristas**
+Para reducir ruido y enfocarse en asociaciones fuertes:
+- Se calculó el **percentil 75** ($P_{75}$) de todos los pesos de co-ocurrencia
+- Se eliminaron aristas con peso $< P_{75}$
+- Esto resulta en redes más densas y biológicamente interpretables
+
+**Paso 4: Eliminación de Nodos Aislados**
+Nodos sin conexiones (grado = 0) fueron eliminados del análisis, ya que no aportan información sobre patrones de co-ocurrencia.
+
+### Redes Construidas
+Se generaron **tres redes independientes**, una para cada sistema de clasificación:
+
+1. **Red PAM50:** Incluye los 7 subtipos PAM50 + características clínicas
+2. **Red 3-Gene:** Incluye los 4 subtipos del clasificador 3-Gene + características clínicas
+3. **Red Integrative Cluster:** Incluye los 11 clusters integrativos + características clínicas
+
+---
+
+## Métricas de Topología de Redes
+
+### Métricas Globales
+Para caracterizar la estructura general de cada red, se calcularon:
+
+**Nodos y Aristas:**
+- Número total de nodos (características)
+- Número total de aristas (co-ocurrencias significativas)
+
+**Densidad (D):**
+
+$$D = \frac{2E}{N(N-1)}$$
+
+Donde $E$ = número de aristas, $N$ = número de nodos
+
+Interpretación: Proporción de conexiones observadas respecto al máximo posible. Valores altos indican redes altamente interconectadas.
+
+**Coeficiente de Clustering Global (C):**
+
+$$C = \frac{\text{Número de triángulos} \times 3}{\text{Número de tríadas conectadas}}$$
+
+Interpretación: Tendencia de los nodos a formar grupos densos. Valores altos sugieren modularidad.
+
+**Diámetro (d):**
+
+$$d = \max_{i,j} \{\text{distancia}_{\text{mínima}}(i,j)\}$$
+
+Interpretación: Distancia máxima entre dos nodos cualesquiera. Refleja la "extensión" de la red.
+
+**Modularidad (Q):**
+Métrica que cuantifica la calidad de la partición en comunidades:
+
+$$Q = \frac{1}{2m} \sum_{ij} \left[A_{ij} - \frac{k_i k_j}{2m}\right] \delta(c_i, c_j)$$
+
+Donde:
+- $m$ = número de aristas
+- $A_{ij}$ = peso de la arista entre $i$ y $j$
+- $k_i, k_j$ = grados de los nodos $i$ y $j$
+- $\delta(c_i, c_j) = 1$ si $i$ y $j$ están en la misma comunidad, 0 en caso contrario
+
+Valores $Q > 0.3$ indican estructura comunitaria significativa.
+
+### Métricas de Centralidad Nodal
+
+Para identificar características "importantes" en la red:
+
+**Grado (Degree):**
+
+$$k_i = \sum_j A_{ij}$$
+
+Número de conexiones directas de un nodo. Identifica características que co-ocurren con muchas otras.
+
+**Intermediación (Betweenness Centrality):**
+
+$$BC_i = \sum_{s \neq i \neq t} \frac{\sigma_{st}(i)}{\sigma_{st}}$$
+
+Donde $\sigma_{st}$ = número de caminos más cortos entre $s$ y $t$, y $\sigma_{st}(i)$ = número que pasan por $i$.
+
+Identifica "puentes" entre diferentes regiones de la red.
+
+**Cercanía (Closeness Centrality):**
+
+$$CC_i = \frac{1}{\sum_j d(i,j)}$$
+
+Inverso de la suma de distancias a todos los demás nodos. Identifica nodos "centrales".
+
+**Eigenvector Centrality:**
+Centralidad basada en la importancia de los vecinos:
+
+$$x_i = \frac{1}{\lambda} \sum_j A_{ij} x_j$$
+
+Identifica nodos conectados a otros nodos importantes.
+
+---
+
+## Detección de Comunidades
+
+### Algoritmo de Louvain
+Se utilizó el algoritmo de Louvain para detectar comunidades (módulos) en cada red. Este es un método de optimización de modularidad que opera en dos fases:
+
+**Fase 1:** Optimización local
+- Cada nodo se asigna a la comunidad de un vecino si esto aumenta la modularidad
+
+**Fase 2:** Agregación
+- Se construye una nueva red donde cada comunidad se convierte en un nodo
+
+El proceso se repite iterativamente hasta convergencia.
+
+**Ventajas del método:**
+- Computacionalmente eficiente
+- No requiere especificar número de comunidades a priori
+- Detecta comunidades a múltiples escalas
+
+### Caracterización de Comunidades
+Para cada comunidad detectada se calculó:
+
+1. **Tamaño:** Número de nodos
+2. **Densidad interna:** Proporción de conexiones internas vs. posibles
+3. **Grado promedio:** Conectividad media de los nodos
+4. **Características principales:** Los 3 nodos de mayor grado en la comunidad
+5. **Score de estabilidad:** Combinación ponderada de densidad interna y grado medio
+
+---
+
+## Análisis de K-Core
+
+### Definición
+El $k$-core de una red es el subgrafo maximal donde cada nodo tiene al menos $k$ conexiones dentro del subgrafo.
+
+### Procedimiento
+1. Para cada nodo, se calculó su **coreness** ($k$ máximo para el cual pertenece al $k$-core)
+2. Se identificaron nodos en el núcleo más denso (mayor $k$-core)
+3. Se visualizaron capas de $k$-core como indicador de jerarquía en la red
+
+### Interpretación Biológica
+- **Alto $k$-core:** Características en el "núcleo" del perfil de cáncer de mama
+- **Bajo $k$-core:** Características periféricas o específicas de subtipos
+- Revela **jerarquía de importancia** clínica
+
+---
+
+## Identificación de Nodos Hub y Puente
+
+### Nodos Hub
+Definidos como nodos que cumplen simultáneamente:
+- Grado $\geq$ percentil 90
+- Eigenvector centrality $\geq$ percentil 90
+
+**Interpretación:** Características centrales que co-ocurren con muchas otras características importantes.
+
+### Nodos Puente (Gateway Nodes)
+Para cada nodo $i$, se calculó el **Gateway Score (GS)**:
+
+$$GS_i = N_{\text{communities}} \times P_{\text{external}} \times k_i$$
+
+Donde:
+- $N_{\text{communities}}$ = número de comunidades diferentes a las que se conecta
+- $P_{\text{external}}$ = proporción de vecinos en otras comunidades
+- $k_i$ = grado del nodo
+
+**Interpretación:** 
+- Alto GS indica nodos que conectan diferentes módulos funcionales
+- Potenciales características de transición entre subtipos
+- Relevantes para entender heterogeneidad intratumoral
+
+---
+
+## Análisis Comparativos
+
+### Comparación Entre Sistemas de Clasificación
+Se compararon las tres redes (PAM50, 3-Gene, IntCluster) en términos de:
+- Métricas topológicas globales
+- Número y tamaño de comunidades
+- Características más centrales
+
+### Análisis de Subgrupos Específicos
+
+**Luminal A vs. Luminal B:**
+- Comparación de frecuencias de características clínicas
+- Identificación de marcadores diferenciales
+- Análisis de patrones de tratamiento
+
+**Triple Negativo vs. HER2+:**
+- Comparación de agresividad (grado, estadio)
+- Patrones de tratamiento
+- Desenlaces clínicos (supervivencia, recurrencia)
+
+### Análisis de Supervivencia y Recurrencia
+Para cada subtipo molecular se calculó:
+- Distribución de estado vital (vivo/fallecido)
+- Tasa de recurrencia
+- Tablas de contingencia con pruebas de significancia
+
+---
+
+## Software y Herramientas Computacionales
+
+### Lenguaje y Entorno
+- **R version 4.3+**
+- **RStudio** para análisis interactivo
+- Documentos R Markdown (.Rmd) para reproducibilidad
+
+### Paquetes Utilizados
+
+**Análisis de Redes:**
+- `igraph` (v1.5+): Construcción y análisis de redes
+- `ggraph` (v2.1+): Visualización avanzada de redes
+
+**Manipulación de Datos:**
+- `tidyverse` (v2.0+): Manipulación y transformación de datos
+  - `dplyr`: Operaciones de datos
+  - `tidyr`: Reestructuración de datos
+  - `ggplot2`: Visualización base
+
+**Visualización:**
+- `viridis`: Paletas de colores accesibles
+- `RColorBrewer`: Paletas categóricas
+- `gridExtra`: Composición de gráficos múltiples
+- `scales`: Formateo de escalas
+
+**Tablas Interactivas:**
+- `DT` (v0.28+): Tablas HTML interactivas con funcionalidad de exportación
+
+### Parámetros de Visualización
+- Resolución de figuras: 300 DPI
+- Formato de salida: PNG con fondo blanco
+- Dimensiones estándar: 14" × 12" para redes, 14" × 8" para comparaciones
+- Layouts de red: Fruchterman-Reingold con seed fijo para reproducibilidad
+
+---
+
+## Consideraciones Éticas y de Datos
+
+### Datos Públicos
+El dataset METABRIC es de acceso público y ha sido anonimizado completamente:
+- No contiene identificadores personales
+- Cumple con regulaciones de privacidad (GDPR, HIPAA)
+- Datos disponibles en repositorios científicos reconocidos
+
+### Reproducibilidad
+Todo el análisis es completamente reproducible:
+- Código documentado en R Markdown
+- Seeds fijos para procesos estocásticos
+- Versionado de paquetes especificado
+- Datos de entrada y salida preservados
+
+### Limitaciones Metodológicas
+
+**Sesgos de Selección:**
+- Cohorte retrospectiva (no prospectiva)
+- Pacientes de sistema de salud británico (generalizabilidad limitada)
+- Sesgo de supervivencia en datos de seguimiento
+
+**Limitaciones del Análisis de Redes:**
+- Redes no ponderadas pierden información cuantitativa
+- Filtrado de aristas (percentil 75) es arbitrario pero estándar
+- Correlación ≠ causalidad
+
+**Limitaciones de Datos:**
+- Datos faltantes (NA) manejados como categoría "Unknown"
+- Variables numéricas discretizadas (pérdida de resolución)
+- Clasificaciones moleculares no siempre concordantes
+
+---
+
+## Validación y Control de Calidad
+
+### Validación de Redes
+- Comparación de métricas entre redes para detectar anomalías
+- Verificación de distribución de grados (evitar hubs artificiales)
+- Inspección manual de subgrafos críticos
+
+### Control de Calidad de Datos
+- Verificación de rangos de variables numéricas
+- Conteo de valores faltantes por variable
+- Detección de outliers en métricas de centralidad
+
+### Sensibilidad de Parámetros
+Se evaluó sensibilidad a:
+- Umbral de filtrado de aristas (percentiles 70, 75, 80)
+- Métodos de normalización alternativos
+- Algoritmos de detección de comunidades (Louvain vs. Walktrap)
+
+
+
+## Criterios de Interpretación
+
+### Significancia de Métricas
+
+**Densidad:**
+- $D < 0.1$: Red dispersa
+- $0.1 \leq D \leq 0.3$: Densidad moderada
+- $D > 0.3$: Red densa
+
+**Modularidad:**
+- $Q < 0.3$: Sin estructura comunitaria clara
+- $0.3 \leq Q \leq 0.7$: Estructura comunitaria moderada
+- $Q > 0.7$: Comunidades muy definidas
+
+**Grado de Nodo:**
+- Alto: Característica con múltiples asociaciones
+- Bajo: Característica específica o poco conectada
+
+### Umbrales de Centralidad
+Se consideraron nodos "importantes" aquellos en:
+- Percentil $\geq 90$ de grado
+- Percentil $\geq 90$ de eigenvector
+- Percentil $\geq 80$ de betweenness
+- Top 10 de gateway score
+
+### Relevancia Clínica
+Un hallazgo se consideró clínicamente relevante si:
+1. Era reproducible en múltiples redes
+2. Tenía soporte en literatura biomédica
+3. Mostraba asociación con desenlaces clínicos
+4. Era accionable desde perspectiva terapéutica
+
+---
+
+## Referencias Metodológicas
+
+**Análisis de Redes:**
+- Barabási AL, et al. Network medicine: a network-based approach to human disease. Nat Rev Genet. 2011;12(1):56-68.
+- Newman MEJ. Networks: An Introduction. Oxford University Press; 2010.
+- Blondel VD, et al. Fast unfolding of communities in large networks. J Stat Mech. 2008;P10008.
+
+**Cáncer de Mama:**
+- Perou CM, et al. Molecular portraits of human breast tumours. Nature. 2000;406:747-752.
+- Curtis C, et al. The genomic and transcriptomic architecture of 2,000 breast tumours reveals novel subgroups. Nature. 2012;486:346-352.
+
+**Software:**
+- R Core Team. R: A language and environment for statistical computing. R Foundation for Statistical Computing; 2023.
+- Csardi G, Nepusz T. The igraph software package for complex network research. InterJournal Complex Systems. 2006;1695.
+
+
+# Resultados 
+
+## Exploración de Clasificaciones Génicas
+
+### Distribución de Subtipos Moleculares
+
+```{r exploracion_subtipos}
+# PAM50 + Claudin-low
+pam50_dist <- datos %>%
+  count(Pam50...Claudin.low.subtype) %>%
+  filter(!is.na(Pam50...Claudin.low.subtype)) %>%
+  arrange(desc(n)) %>%
+  mutate(
+    Porcentaje = round(n / sum(n) * 100, 2),
+    Subtipo = Pam50...Claudin.low.subtype
+  )
+
+# 3-Gene classifier
+gene3_dist <- datos %>%
+  count(X3.Gene.classifier.subtype) %>%
+  filter(!is.na(X3.Gene.classifier.subtype)) %>%
+  arrange(desc(n)) %>%
+  mutate(
+    Porcentaje = round(n / sum(n) * 100, 2),
+    Subtipo = X3.Gene.classifier.subtype
+  )
+
+# Integrative Cluster
+intclust_dist <- datos %>%
+  count(Integrative.Cluster) %>%
+  filter(!is.na(Integrative.Cluster)) %>%
+  arrange(desc(n)) %>%
+  mutate(
+    Porcentaje = round(n / sum(n) * 100, 2),
+    Cluster = Integrative.Cluster
+  )
+```
+
+#### Tabla: Distribución PAM50 + Claudin-low
+
+```{r tabla_pam50}
+datatable(
+  pam50_dist %>% select(Subtipo, n, Porcentaje),
+  colnames = c("Subtipo PAM50", "N° Casos", "Porcentaje (%)"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Distribución de subtipos moleculares PAM50 + Claudin-low"
+) %>%
+  formatRound('Porcentaje', 2)
+```
+
+#### Tabla: Distribución 3-Gene Classifier
+
+```{r tabla_3gene}
+datatable(
+  gene3_dist %>% select(Subtipo, n, Porcentaje),
+  colnames = c("Subtipo 3-Gene", "N° Casos", "Porcentaje (%)"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Distribución de subtipos según clasificador de 3 genes"
+) %>%
+  formatRound('Porcentaje', 2)
+```
+
+#### Tabla: Distribución Integrative Cluster
+
+```{r tabla_intclust}
+datatable(
+  intclust_dist %>% select(Cluster, n, Porcentaje),
+  colnames = c("Cluster Integrativo", "N° Casos", "Porcentaje (%)"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Distribución de clusters integrativos"
+) %>%
+  formatRound('Porcentaje', 2)
+```
+
+### Visualización de Distribuciones
+
+```{r viz_distribuciones, fig.width=14, fig.height=10}
+p1 <- ggplot(pam50_dist, aes(x = reorder(Subtipo, n), y = n, fill = Subtipo)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_text(aes(label = paste0(n, " (", Porcentaje, "%)")), 
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(
+    title = "Distribución de Subtipos PAM50 + Claudin-low",
+    x = "Subtipo Molecular",
+    y = "Número de Casos"
+  ) +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+
+p2 <- ggplot(gene3_dist, aes(x = reorder(Subtipo, n), y = n, fill = Subtipo)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_text(aes(label = paste0(n, " (", Porcentaje, "%)")), 
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "mako") +
+  labs(
+    title = "Distribución de Subtipos 3-Gene Classifier",
+    x = "Subtipo",
+    y = "Número de Casos"
+  ) +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+
+p3 <- ggplot(intclust_dist, aes(x = reorder(Cluster, n), y = n, fill = Cluster)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_text(aes(label = paste0(n, " (", Porcentaje, "%)")), 
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "rocket") +
+  labs(
+    title = "Distribución de Clusters Integrativos",
+    x = "Cluster",
+    y = "Número de Casos"
+  ) +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+
+grid.arrange(p1, p2, p3, ncol = 1)
+
+ggsave("figuras_redes/distribucion_subtipos.png", 
+       arrangeGrob(p1, p2, p3, ncol = 1),
+       width = 14, height = 10, dpi = 300, bg = "white")
+```
+
+## Preparación de Datos para Análisis de Redes
+
+### Selección y Limpieza de Variables Clínicas
+
+```{r preparacion_datos}
+# Seleccionar variables clínicas relevantes
+datos_red <- datos %>%
+  select(
+    Patient.ID,
+    Pam50...Claudin.low.subtype,
+    X3.Gene.classifier.subtype,
+    Integrative.Cluster,
+    ER.Status,
+    PR.Status,
+    HER2.Status,
+    Neoplasm.Histologic.Grade,
+    Tumor.Stage,
+    Cellularity,
+    Chemotherapy,
+    Hormone.Therapy,
+    Radio.Therapy,
+    Inferred.Menopausal.State,
+    Cancer.Type.Detailed,
+    Overall.Survival.Status,
+    Relapse.Free.Status,
+    Type.of.Breast.Surgery,
+    Primary.Tumor.Laterality,
+    Tumor.Other.Histologic.Subtype,
+    Age.at.Diagnosis,
+    Tumor.Size,
+    Lymph.nodes.examined.positive
+  ) %>%
+  rename(
+    Patient = Patient.ID,
+    PAM50 = Pam50...Claudin.low.subtype,
+    Gene3 = X3.Gene.classifier.subtype,
+    IntCluster = Integrative.Cluster,
+    ER = ER.Status,
+    PR = PR.Status,
+    HER2 = HER2.Status,
+    Grade = Neoplasm.Histologic.Grade,
+    Stage = Tumor.Stage,
+    Cell = Cellularity,
+    Chemo = Chemotherapy,
+    Hormone = Hormone.Therapy,
+    Radio = Radio.Therapy,
+    Menopause = Inferred.Menopausal.State,
+    CancerType = Cancer.Type.Detailed,
+    Survival = Overall.Survival.Status,
+    Relapse = Relapse.Free.Status,
+    Surgery = Type.of.Breast.Surgery,
+    Laterality = Primary.Tumor.Laterality,
+    HistoSubtype = Tumor.Other.Histologic.Subtype,
+    Age = Age.at.Diagnosis,
+    TumorSize = Tumor.Size,
+    LymphNodes = Lymph.nodes.examined.positive
+  ) %>%
+  mutate(
+    # Convertir a categorías
+    ER = factor(ER),
+    PR = factor(PR),
+    HER2 = factor(HER2),
+    Grade = factor(Grade),
+    Stage = factor(Stage),
+    Chemo = factor(Chemo),
+    Hormone = factor(Hormone),
+    Radio = factor(Radio),
+    Cell = factor(Cell),
+    Menopause = factor(Menopause),
+    Survival = factor(Survival),
+    Relapse = factor(Relapse),
+    Surgery = factor(Surgery),
+    Laterality = factor(Laterality),
+    HistoSubtype = factor(HistoSubtype),
+    CancerType = factor(CancerType),
+    # Categorizar variables numéricas para análisis de red
+    AgeGroup = cut(Age, breaks = c(0, 40, 50, 60, 70, 100), 
+                   labels = c("<40", "40-50", "50-60", "60-70", ">70"),
+                   include.lowest = TRUE),
+    SizeGroup = cut(TumorSize, breaks = c(0, 20, 30, 50, 200),
+                    labels = c("Small(<20mm)", "Medium(20-30)", "Large(30-50)", "VeryLarge(>50)"),
+                    include.lowest = TRUE),
+    LymphGroup = cut(LymphNodes, breaks = c(-1, 0, 1, 3, 50),
+                     labels = c("N0", "N1", "N2-3", "N>3"),
+                     include.lowest = TRUE)
+  )
+
+summary_clean <- datos_red %>%
+  summarise(
+    Total_Pacientes = n(),
+    PAM50_disponible = sum(!is.na(PAM50)),
+    Gene3_disponible = sum(!is.na(Gene3)),
+    IntCluster_disponible = sum(!is.na(IntCluster)),
+    ER_disponible = sum(!is.na(ER)),
+    HER2_disponible = sum(!is.na(HER2))
+  )
+```
+
+**Resumen de datos procesados:**
+
+```{r tabla_resumen_datos}
+datatable(
+  summary_clean,
+  options = list(dom = 't'),
+  caption = "Disponibilidad de variables clave para análisis"
+)
+```
+
+## Construcción de Redes de Co-ocurrencia
+
+### Red por Subtipo PAM50
+
+```{r red_pam50}
+# Filtrar datos con PAM50 disponible
+datos_pam50 <- datos_red %>%
+  filter(!is.na(PAM50))
+
+# Crear matriz de características
+matriz_caracteristicas <- datos_pam50 %>%
+  select(
+    PAM50, ER, PR, HER2, Grade, Stage, Cell, Chemo, 
+    Hormone, Radio, Menopause, Surgery, Laterality, 
+    HistoSubtype, AgeGroup, SizeGroup, LymphGroup,
+    Survival, Relapse
+  ) %>%
+  mutate(across(everything(), as.character)) %>%
+  mutate(across(everything(), ~replace_na(., "Unknown")))
+
+# Formato largo para análisis de red
+datos_largo <- matriz_caracteristicas %>%
+  mutate(id = row_number()) %>%
+  pivot_longer(
+    cols = -id,
+    names_to = "Variable",
+    values_to = "Valor"
+  ) %>%
+  mutate(Caracteristica = paste(Variable, Valor, sep = ": "))
+
+# Matriz binaria: paciente x característica
+matriz_bin <- datos_largo %>%
+  mutate(presente = 1) %>%
+  pivot_wider(
+    id_cols = id,
+    names_from = Caracteristica,
+    values_from = presente,
+    values_fill = 0
+  ) %>%
+  select(-id) %>%
+  as.matrix()
+
+# Matriz de co-ocurrencia: t(X) %*% X
+coocurrencia <- t(matriz_bin) %*% matriz_bin
+
+# Normalizar (Jaccard-like)
+freq_individual <- diag(coocurrencia)
+cooc_norm <- coocurrencia / outer(sqrt(freq_individual), sqrt(freq_individual))
+diag(cooc_norm) <- 0
+
+# Filtrar aristas débiles (percentil 75)
+umbral <- quantile(cooc_norm[upper.tri(cooc_norm)], 0.75)
+cooc_filtrada <- cooc_norm * (cooc_norm >= umbral)
+
+# Crear grafo
+red_pam50 <- graph_from_adjacency_matrix(
+  cooc_filtrada,
+  mode = "undirected",
+  weighted = TRUE,
+  diag = FALSE
+)
+
+# Eliminar nodos aislados
+red_pam50 <- delete.vertices(red_pam50, degree(red_pam50) == 0)
+
+# Métricas de centralidad
+V(red_pam50)$degree <- degree(red_pam50)
+V(red_pam50)$betweenness <- betweenness(red_pam50, normalized = TRUE)
+V(red_pam50)$eigenvector <- eigen_centrality(red_pam50)$vector
+V(red_pam50)$closeness <- closeness(red_pam50, normalized = TRUE)
+
+# Detección de comunidades
+comunidades_pam50 <- cluster_louvain(red_pam50)
+V(red_pam50)$community <- membership(comunidades_pam50)
+
+# Métricas de la red
+metricas_pam50 <- data.frame(
+  Metrica = c(
+    "Nodos",
+    "Aristas",
+    "Densidad",
+    "Clustering Global",
+    "Diámetro",
+    "Comunidades",
+    "Modularidad"
+  ),
+  Valor = c(
+    vcount(red_pam50),
+    ecount(red_pam50),
+    round(edge_density(red_pam50), 4),
+    round(transitivity(red_pam50, type = "global"), 4),
+    diameter(red_pam50, directed = FALSE),
+    length(unique(V(red_pam50)$community)),
+    round(modularity(comunidades_pam50), 4)
+  )
+)
+```
+
+#### Tabla: Métricas de Red PAM50
+
+```{r tabla_metricas_pam50}
+datatable(
+  metricas_pam50,
+  colnames = c("Métrica de Red", "Valor"),
+  options = list(
+    dom = 't',
+    pageLength = 10
+  ),
+  caption = "Métricas topológicas de la red de características clínicas (PAM50)"
+)
+```
+
+#### Visualización: Red de Co-ocurrencia PAM50
+
+```{r viz_red_pam50, fig.width=14, fig.height=12}
+set.seed(123)
+layout_fr <- layout_with_fr(red_pam50)
+
+p_red_pam50 <- ggraph(red_pam50, layout = layout_fr) +
+  geom_edge_link(aes(width = weight, alpha = weight), color = "gray70") +
+  geom_node_point(aes(size = degree, color = factor(community)), alpha = 0.8) +
+  geom_node_text(aes(label = name), size = 2.5, repel = TRUE, max.overlaps = 20) +
+  scale_edge_width(range = c(0.3, 2)) +
+  scale_edge_alpha(range = c(0.3, 0.8)) +
+  scale_size_continuous(range = c(3, 12)) +
+  scale_color_viridis_d(option = "turbo") +
+  labs(
+    title = "Red de Co-ocurrencia de Características Clínicas",
+    subtitle = "Análisis por Subtipo PAM50 + Claudin-low",
+    size = "Grado",
+    color = "Comunidad"
+  ) +
+  theme_graph() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+print(p_red_pam50)
+
+ggsave("figuras_redes/red_pam50_completa.png", p_red_pam50,
+       width = 14, height = 12, dpi = 300, bg = "white")
+```
+
+#### Tabla: Top Nodos Centrales (PAM50)
+
+```{r tabla_centralidad_pam50}
+centralidad_pam50 <- data.frame(
+  Caracteristica = V(red_pam50)$name,
+  Grado = V(red_pam50)$degree,
+  Intermediacion = round(V(red_pam50)$betweenness, 4),
+  Cercania = round(V(red_pam50)$closeness, 4),
+  Eigenvector = round(V(red_pam50)$eigenvector, 4),
+  Comunidad = V(red_pam50)$community
+) %>%
+  arrange(desc(Grado)) %>%
+  head(20)
+
+datatable(
+  centralidad_pam50,
+  colnames = c("Característica", "Grado", "Intermediación", "Cercanía", "Eigenvector", "Comunidad"),
+  options = list(
+    pageLength = 20,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Top 20 características más centrales en la red PAM50"
+) %>%
+  formatRound(c('Intermediacion', 'Cercania', 'Eigenvector'), 4)
+```
+
+### Red por Clasificador 3-Gene
+
+```{r red_3gene}
+datos_3gene <- datos_red %>%
+  filter(!is.na(Gene3))
+
+matriz_caracteristicas_3g <- datos_3gene %>%
+  select(
+    Gene3, ER, PR, HER2, Grade, Stage, Cell, Chemo, 
+    Hormone, Radio, Menopause, Surgery, Laterality, 
+    HistoSubtype, AgeGroup, SizeGroup, LymphGroup,
+    Survival, Relapse
+  ) %>%
+  mutate(across(everything(), as.character)) %>%
+  mutate(across(everything(), ~replace_na(., "Unknown")))
+
+datos_largo_3g <- matriz_caracteristicas_3g %>%
+  mutate(id = row_number()) %>%
+  pivot_longer(
+    cols = -id,
+    names_to = "Variable",
+    values_to = "Valor"
+  ) %>%
+  mutate(Caracteristica = paste(Variable, Valor, sep = ": "))
+
+matriz_bin_3g <- datos_largo_3g %>%
+  mutate(presente = 1) %>%
+  pivot_wider(
+    id_cols = id,
+    names_from = Caracteristica,
+    values_from = presente,
+    values_fill = 0
+  ) %>%
+  select(-id) %>%
+  as.matrix()
+
+coocurrencia_3g <- t(matriz_bin_3g) %*% matriz_bin_3g
+freq_individual_3g <- diag(coocurrencia_3g)
+cooc_norm_3g <- coocurrencia_3g / outer(sqrt(freq_individual_3g), sqrt(freq_individual_3g))
+diag(cooc_norm_3g) <- 0
+
+umbral_3g <- quantile(cooc_norm_3g[upper.tri(cooc_norm_3g)], 0.75)
+cooc_filtrada_3g <- cooc_norm_3g * (cooc_norm_3g >= umbral_3g)
+
+red_3gene <- graph_from_adjacency_matrix(
+  cooc_filtrada_3g,
+  mode = "undirected",
+  weighted = TRUE,
+  diag = FALSE
+)
+
+red_3gene <- delete.vertices(red_3gene, degree(red_3gene) == 0)
+
+V(red_3gene)$degree <- degree(red_3gene)
+V(red_3gene)$betweenness <- betweenness(red_3gene, normalized = TRUE)
+V(red_3gene)$eigenvector <- eigen_centrality(red_3gene)$vector
+
+comunidades_3gene <- cluster_louvain(red_3gene)
+V(red_3gene)$community <- membership(comunidades_3gene)
+
+metricas_3gene <- data.frame(
+  Metrica = c(
+    "Nodos",
+    "Aristas",
+    "Densidad",
+    "Clustering Global",
+    "Diámetro",
+    "Comunidades",
+    "Modularidad"
+  ),
+  Valor = c(
+    vcount(red_3gene),
+    ecount(red_3gene),
+    round(edge_density(red_3gene), 4),
+    round(transitivity(red_3gene, type = "global"), 4),
+    diameter(red_3gene, directed = FALSE),
+    length(unique(V(red_3gene)$community)),
+    round(modularity(comunidades_3gene), 4)
+  )
+)
+```
+
+#### Tabla: Métricas de Red 3-Gene
+
+```{r tabla_metricas_3gene}
+datatable(
+  metricas_3gene,
+  colnames = c("Métrica de Red", "Valor"),
+  options = list(dom = 't'),
+  caption = "Métricas topológicas de la red 3-Gene Classifier"
+)
+```
+
+#### Visualización: Red 3-Gene Classifier
+
+```{r viz_red_3gene, fig.width=14, fig.height=12}
+set.seed(456)
+layout_fr_3g <- layout_with_fr(red_3gene)
+
+p_red_3gene <- ggraph(red_3gene, layout = layout_fr_3g) +
+  geom_edge_link(aes(width = weight, alpha = weight), color = "gray70") +
+  geom_node_point(aes(size = degree, color = factor(community)), alpha = 0.8) +
+  geom_node_text(aes(label = name), size = 2.5, repel = TRUE, max.overlaps = 20) +
+  scale_edge_width(range = c(0.3, 2)) +
+  scale_edge_alpha(range = c(0.3, 0.8)) +
+  scale_size_continuous(range = c(3, 12)) +
+  scale_color_viridis_d(option = "plasma") +
+  labs(
+    title = "Red de Co-ocurrencia: Clasificador 3-Gene",
+    subtitle = "Relaciones entre características clínicas y subtipos moleculares",
+    size = "Grado",
+    color = "Comunidad"
+  ) +
+  theme_graph() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+print(p_red_3gene)
+
+ggsave("figuras_redes/red_3gene_completa.png", p_red_3gene,
+       width = 14, height = 12, dpi = 300, bg = "white")
+```
+
+#### Tabla: Top Nodos Centrales (3-Gene)
+
+```{r tabla_centralidad_3gene}
+centralidad_3gene <- data.frame(
+  Caracteristica = V(red_3gene)$name,
+  Grado = V(red_3gene)$degree,
+  Intermediacion = round(V(red_3gene)$betweenness, 4),
+  Eigenvector = round(V(red_3gene)$eigenvector, 4),
+  Comunidad = V(red_3gene)$community
+) %>%
+  arrange(desc(Grado)) %>%
+  head(20)
+
+datatable(
+  centralidad_3gene,
+  colnames = c("Característica", "Grado", "Intermediación", "Eigenvector", "Comunidad"),
+  options = list(
+    pageLength = 20,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Top 20 características más centrales en la red 3-Gene"
+) %>%
+  formatRound(c('Intermediacion', 'Eigenvector'), 4)
+```
+
+### Red por Integrative Cluster
+
+```{r red_intcluster}
+datos_intclust <- datos_red %>%
+  filter(!is.na(IntCluster))
+
+matriz_caracteristicas_ic <- datos_intclust %>%
+  select(
+    IntCluster, ER, PR, HER2, Grade, Stage, Cell, Chemo, 
+    Hormone, Radio, Menopause, Surgery, Laterality, 
+    HistoSubtype, AgeGroup, SizeGroup, LymphGroup,
+    Survival, Relapse
+  ) %>%
+  mutate(across(everything(), as.character)) %>%
+  mutate(across(everything(), ~replace_na(., "Unknown")))
+
+datos_largo_ic <- matriz_caracteristicas_ic %>%
+  mutate(id = row_number()) %>%
+  pivot_longer(
+    cols = -id,
+    names_to = "Variable",
+    values_to = "Valor"
+  ) %>%
+  mutate(Caracteristica = paste(Variable, Valor, sep = ": "))
+
+matriz_bin_ic <- datos_largo_ic %>%
+  mutate(presente = 1) %>%
+  pivot_wider(
+    id_cols = id,
+    names_from = Caracteristica,
+    values_from = presente,
+    values_fill = 0
+  ) %>%
+  select(-id) %>%
+  as.matrix()
+
+coocurrencia_ic <- t(matriz_bin_ic) %*% matriz_bin_ic
+freq_individual_ic <- diag(coocurrencia_ic)
+cooc_norm_ic <- coocurrencia_ic / outer(sqrt(freq_individual_ic), sqrt(freq_individual_ic))
+diag(cooc_norm_ic) <- 0
+
+umbral_ic <- quantile(cooc_norm_ic[upper.tri(cooc_norm_ic)], 0.75)
+cooc_filtrada_ic <- cooc_norm_ic * (cooc_norm_ic >= umbral_ic)
+
+red_intclust <- graph_from_adjacency_matrix(
+  cooc_filtrada_ic,
+  mode = "undirected",
+  weighted = TRUE,
+  diag = FALSE
+)
+
+red_intclust <- delete.vertices(red_intclust, degree(red_intclust) == 0)
+
+V(red_intclust)$degree <- degree(red_intclust)
+V(red_intclust)$betweenness <- betweenness(red_intclust, normalized = TRUE)
+V(red_intclust)$eigenvector <- eigen_centrality(red_intclust)$vector
+
+comunidades_intclust <- cluster_louvain(red_intclust)
+V(red_intclust)$community <- membership(comunidades_intclust)
+
+metricas_intclust <- data.frame(
+  Metrica = c(
+    "Nodos",
+    "Aristas",
+    "Densidad",
+    "Clustering Global",
+    "Diámetro",
+    "Comunidades",
+    "Modularidad"
+  ),
+  Valor = c(
+    vcount(red_intclust),
+    ecount(red_intclust),
+    round(edge_density(red_intclust), 4),
+    round(transitivity(red_intclust, type = "global"), 4),
+    diameter(red_intclust, directed = FALSE),
+    length(unique(V(red_intclust)$community)),
+    round(modularity(comunidades_intclust), 4)
+  )
+)
+```
+
+#### Tabla: Métricas de Red Integrative Cluster
+
+```{r tabla_metricas_intclust}
+datatable(
+  metricas_intclust,
+  colnames = c("Métrica de Red", "Valor"),
+  options = list(dom = 't'),
+  caption = "Métricas topológicas de la red Integrative Cluster"
+)
+```
+
+#### Visualización: Red Integrative Cluster
+
+```{r viz_red_intclust, fig.width=14, fig.height=12}
+set.seed(789)
+layout_fr_ic <- layout_with_fr(red_intclust)
+
+p_red_intclust <- ggraph(red_intclust, layout = layout_fr_ic) +
+  geom_edge_link(aes(width = weight, alpha = weight), color = "gray70") +
+  geom_node_point(aes(size = degree, color = factor(community)), alpha = 0.8) +
+  geom_node_text(aes(label = name), size = 2.5, repel = TRUE, max.overlaps = 20) +
+  scale_edge_width(range = c(0.3, 2)) +
+  scale_edge_alpha(range = c(0.3, 0.8)) +
+  scale_size_continuous(range = c(3, 12)) +
+  scale_color_viridis_d(option = "mako") +
+  labs(
+    title = "Red de Co-ocurrencia: Integrative Cluster",
+    subtitle = "Análisis integrado de características genómicas y clínicas",
+    size = "Grado",
+    color = "Comunidad"
+  ) +
+  theme_graph() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+print(p_red_intclust)
+
+ggsave("figuras_redes/red_intcluster_completa.png", p_red_intclust,
+       width = 14, height = 12, dpi = 300, bg = "white")
+```
+
+#### Tabla: Top Nodos Centrales (Integrative Cluster)
+
+```{r tabla_centralidad_intclust}
+centralidad_intclust <- data.frame(
+  Caracteristica = V(red_intclust)$name,
+  Grado = V(red_intclust)$degree,
+  Intermediacion = round(V(red_intclust)$betweenness, 4),
+  Eigenvector = round(V(red_intclust)$eigenvector, 4),
+  Comunidad = V(red_intclust)$community
+) %>%
+  arrange(desc(Grado)) %>%
+  head(20)
+
+datatable(
+  centralidad_intclust,
+  colnames = c("Característica", "Grado", "Intermediación", "Eigenvector", "Comunidad"),
+  options = list(
+    pageLength = 20,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Top 20 características más centrales en la red Integrative Cluster"
+) %>%
+  formatRound(c('Intermediacion', 'Eigenvector'), 4)
+```
+
+## Comparación de Redes
+
+### Comparación de Métricas Topológicas
+
+```{r comparacion_metricas}
+comparacion <- data.frame(
+  Red = c("PAM50", "3-Gene", "IntCluster"),
+  Nodos = c(metricas_pam50$Valor[1], metricas_3gene$Valor[1], metricas_intclust$Valor[1]),
+  Aristas = c(metricas_pam50$Valor[2], metricas_3gene$Valor[2], metricas_intclust$Valor[2]),
+  Densidad = c(metricas_pam50$Valor[3], metricas_3gene$Valor[3], metricas_intclust$Valor[3]),
+  Clustering = c(metricas_pam50$Valor[4], metricas_3gene$Valor[4], metricas_intclust$Valor[4]),
+  Comunidades = c(metricas_pam50$Valor[6], metricas_3gene$Valor[6], metricas_intclust$Valor[6]),
+  Modularidad = c(metricas_pam50$Valor[7], metricas_3gene$Valor[7], metricas_intclust$Valor[7])
+)
+
+datatable(
+  comparacion,
+  colnames = c("Red", "Nodos", "Aristas", "Densidad", "Clustering", "Comunidades", "Modularidad"),
+  options = list(
+    dom = 't',
+    pageLength = 5
+  ),
+  caption = "Comparación de métricas topológicas entre las tres redes"
+) %>%
+  formatRound(c('Densidad', 'Clustering', 'Modularidad'), 4)
+```
+
+### Visualización Comparativa
+
+```{r viz_comparacion, fig.width=14, fig.height=8}
+comparacion_long <- comparacion %>%
+  select(Red, Densidad, Clustering, Modularidad) %>%
+  pivot_longer(cols = -Red, names_to = "Metrica", values_to = "Valor")
+
+p_comp <- ggplot(comparacion_long, aes(x = Red, y = Valor, fill = Red)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  facet_wrap(~Metrica, scales = "free_y", ncol = 3) +
+  scale_fill_viridis_d(option = "rocket") +
+  labs(
+    title = "Comparación de Métricas entre Redes",
+    subtitle = "Densidad, Clustering Global y Modularidad",
+    x = "Tipo de Red",
+    y = "Valor"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 11),
+    plot.title = element_text(size = 14, face = "bold")
+  )
+
+print(p_comp)
+
+ggsave("figuras_redes/comparacion_metricas.png", p_comp,
+       width = 14, height = 8, dpi = 300, bg = "white")
+```
+
+## Análisis de Comunidades
+
+### Comunidades en Red PAM50
+
+```{r analisis_comunidades_pam50}
+comunidades_df_pam50 <- data.frame(
+  Caracteristica = V(red_pam50)$name,
+  Comunidad = V(red_pam50)$community,
+  Grado = V(red_pam50)$degree
+) %>%
+  arrange(Comunidad, desc(Grado))
+
+resumen_comunidades_pam50 <- comunidades_df_pam50 %>%
+  group_by(Comunidad) %>%
+  summarise(
+    N_Nodos = n(),
+    Grado_Promedio = round(mean(Grado), 2),
+    Grado_Max = max(Grado),
+    Principales = paste(head(Caracteristica, 3), collapse = " | ")
+  ) %>%
+  arrange(desc(N_Nodos))
+
+datatable(
+  resumen_comunidades_pam50,
+  colnames = c("Comunidad", "N° Nodos", "Grado Promedio", "Grado Máximo", "Principales Características"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Análisis de comunidades detectadas en red PAM50"
+)
+```
+
+### Comunidades en Red 3-Gene
+
+```{r analisis_comunidades_3gene}
+comunidades_df_3gene <- data.frame(
+  Caracteristica = V(red_3gene)$name,
+  Comunidad = V(red_3gene)$community,
+  Grado = V(red_3gene)$degree
+) %>%
+  arrange(Comunidad, desc(Grado))
+
+resumen_comunidades_3gene <- comunidades_df_3gene %>%
+  group_by(Comunidad) %>%
+  summarise(
+    N_Nodos = n(),
+    Grado_Promedio = round(mean(Grado), 2),
+    Grado_Max = max(Grado),
+    Principales = paste(head(Caracteristica, 3), collapse = " | ")
+  ) %>%
+  arrange(desc(N_Nodos))
+
+datatable(
+  resumen_comunidades_3gene,
+  colnames = c("Comunidad", "N° Nodos", "Grado Promedio", "Grado Máximo", "Principales Características"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Análisis de comunidades detectadas en red 3-Gene"
+)
+```
+
+### Comunidades en Red Integrative Cluster
+
+```{r analisis_comunidades_intclust}
+comunidades_df_intclust <- data.frame(
+  Caracteristica = V(red_intclust)$name,
+  Comunidad = V(red_intclust)$community,
+  Grado = V(red_intclust)$degree
+) %>%
+  arrange(Comunidad, desc(Grado))
+
+resumen_comunidades_intclust <- comunidades_df_intclust %>%
+  group_by(Comunidad) %>%
+  summarise(
+    N_Nodos = n(),
+    Grado_Promedio = round(mean(Grado), 2),
+    Grado_Max = max(Grado),
+    Principales = paste(head(Caracteristica, 3), collapse = " | ")
+  ) %>%
+  arrange(desc(N_Nodos))
+
+datatable(
+  resumen_comunidades_intclust,
+  colnames = c("Comunidad", "N° Nodos", "Grado Promedio", "Grado Máximo", "Principales Características"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Análisis de comunidades detectadas en red Integrative Cluster"
+)
+```
+
+## Análisis de Sub-redes por Subtipo Específico
+
+### Comparación: LumA vs LumB (PAM50)
+
+```{r subred_lum}
+datos_lum <- datos_red %>%
+  filter(PAM50 %in% c("LumA", "LumB"))
+
+comp_lum <- datos_lum %>%
+  select(PAM50, ER, PR, HER2, Grade, Stage, Chemo, Hormone, Radio) %>%
+  group_by(PAM50) %>%
+  summarise(
+    N = n(),
+    ER_Pos = sum(ER == "Positive", na.rm = TRUE),
+    PR_Pos = sum(PR == "Positive", na.rm = TRUE),
+    HER2_Pos = sum(HER2 == "Positive", na.rm = TRUE),
+    Grade3 = sum(Grade == "3", na.rm = TRUE),
+    Stage2 = sum(Stage == "2", na.rm = TRUE),
+    Chemo_Yes = sum(Chemo == "YES", na.rm = TRUE),
+    Hormone_Yes = sum(Hormone == "YES", na.rm = TRUE),
+    Radio_Yes = sum(Radio == "YES", na.rm = TRUE)
+  ) %>%
+  mutate(across(ER_Pos:Radio_Yes, ~round(./N * 100, 2)))
+
+datatable(
+  comp_lum,
+  colnames = c("Subtipo", "N", "ER+ (%)", "PR+ (%)", "HER2+ (%)", 
+               "Grado 3 (%)", "Estadio 2 (%)", "Quimio (%)", "Hormonal (%)", "Radio (%)"),
+  options = list(
+    dom = 't'
+  ),
+  caption = "Comparación de características entre subtipos Luminales A y B"
+) %>%
+  formatRound(3:10, 2)
+```
+
+### Comparación: Triple Negativo vs HER2+
+
+```{r subred_agresivos}
+datos_agresivos <- datos_red %>%
+  mutate(
+    Triple_Neg = (ER == "Negative" & PR == "Negative" & HER2 == "Negative"),
+    HER2_Pos = (HER2 == "Positive")
+  ) %>%
+  filter(Triple_Neg | HER2_Pos) %>%
+  mutate(
+    Subtipo_Agresivo = case_when(
+      Triple_Neg ~ "Triple Negativo",
+      HER2_Pos ~ "HER2+",
+      TRUE ~ "Otro"
+    )
+  )
+
+comp_agresivos <- datos_agresivos %>%
+  select(Subtipo_Agresivo, Grade, Stage, Chemo, Radio, Survival, Relapse) %>%
+  group_by(Subtipo_Agresivo) %>%
+  summarise(
+    N = n(),
+    Grade3 = sum(Grade == "3", na.rm = TRUE) / n() * 100,
+    Stage3_4 = sum(Stage %in% c("3", "4"), na.rm = TRUE) / n() * 100,
+    Chemo = sum(Chemo == "YES", na.rm = TRUE) / n() * 100,
+    Radio = sum(Radio == "YES", na.rm = TRUE) / n() * 100,
+    Deceased = sum(grepl("DECEASED", Survival), na.rm = TRUE) / n() * 100,
+    Recurred = sum(grepl("Recurred", Relapse), na.rm = TRUE) / n() * 100
+  )
+
+datatable(
+  comp_agresivos,
+  colnames = c("Subtipo", "N", "Grado 3 (%)", "Estadio 3-4 (%)", 
+               "Quimio (%)", "Radio (%)", "Fallecidos (%)", "Recurrencia (%)"),
+  options = list(
+    dom = 't'
+  ),
+  caption = "Comparación entre subtipos agresivos: Triple Negativo vs HER2+"
+) %>%
+  formatRound(3:8, 2)
+```
+
+## Análisis de K-Core
+
+### K-Core en Red PAM50
+
+```{r kcore_pam50}
+kcore_pam50 <- coreness(red_pam50)
+V(red_pam50)$kcore <- kcore_pam50
+
+kcore_summary_pam50 <- data.frame(
+  K_Core = sort(unique(kcore_pam50), decreasing = TRUE)
+) %>%
+  mutate(
+    N_Nodos = sapply(K_Core, function(k) sum(kcore_pam50 == k)),
+    Nodos = sapply(K_Core, function(k) {
+      nodos_k <- V(red_pam50)$name[kcore_pam50 == k]
+      if(length(nodos_k) > 5) {
+        paste(paste(head(nodos_k, 5), collapse = ", "), "...")
+      } else {
+        paste(nodos_k, collapse = ", ")
+      }
+    })
+  )
+
+datatable(
+  kcore_summary_pam50,
+  colnames = c("K-Core", "N° Nodos", "Nodos en K-Core"),
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Análisis de K-Core en red PAM50"
+)
+```
+
+### Visualización K-Core PAM50
+
+```{r viz_kcore_pam50, fig.width=14, fig.height=10}
+p_kcore_pam50 <- ggraph(red_pam50, layout = layout_fr) +
+  geom_edge_link(alpha = 0.3, color = "gray70") +
+  geom_node_point(aes(size = degree, color = kcore), alpha = 0.8) +
+  geom_node_text(
+    aes(label = ifelse(kcore >= quantile(kcore, 0.8), name, "")),
+    size = 3, repel = TRUE, max.overlaps = 15
+  ) +
+  scale_size_continuous(range = c(2, 10)) +
+  scale_color_viridis_c(option = "inferno") +
+  labs(
+    title = "K-Core Analysis: Red PAM50",
+    subtitle = "Núcleo denso de la red (nodos más interconectados)",
+    size = "Grado",
+    color = "K-Core"
+  ) +
+  theme_graph() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+print(p_kcore_pam50)
+
+ggsave("figuras_redes/kcore_pam50.png", p_kcore_pam50,
+       width = 14, height = 10, dpi = 300, bg = "white")
+```
+
+## Identificación de Nodos Hub y Puente
+
+### Gateway Score (Nodos Puente)
+
+```{r gateway_score}
+calcular_gateway <- function(grafo) {
+  gateway_scores <- sapply(V(grafo), function(v) {
+    vecinos <- neighbors(grafo, v)
+    if(length(vecinos) == 0) return(0)
+    
+    comunidad_v <- V(grafo)$community[v]
+    n_comunidades_vecinas <- length(unique(V(grafo)$community[vecinos]))
+    prop_otras_comunidades <- sum(V(grafo)$community[vecinos] != comunidad_v) / length(vecinos)
+    
+    gateway <- n_comunidades_vecinas * prop_otras_comunidades * length(vecinos)
+    return(gateway)
+  })
+  return(gateway_scores)
+}
+
+V(red_pam50)$gateway <- calcular_gateway(red_pam50)
+V(red_3gene)$gateway <- calcular_gateway(red_3gene)
+V(red_intclust)$gateway <- calcular_gateway(red_intclust)
+
+gateway_pam50 <- data.frame(
+  Caracteristica = V(red_pam50)$name,
+  Gateway_Score = round(V(red_pam50)$gateway, 3),
+  Grado = V(red_pam50)$degree,
+  Comunidad = V(red_pam50)$community
+) %>%
+  arrange(desc(Gateway_Score)) %>%
+  head(15)
+
+datatable(
+  gateway_pam50,
+  colnames = c("Característica", "Gateway Score", "Grado", "Comunidad"),
+  options = list(
+    pageLength = 15,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Top 15 nodos puente (Gateway) en red PAM50 - Conectan diferentes comunidades"
+) %>%
+  formatRound('Gateway_Score', 3)
+```
+
+### Nodos Hub (Alto Grado y Centralidad)
+
+```{r hub_nodes}
+umbral_grado <- quantile(V(red_pam50)$degree, 0.90)
+umbral_eigen <- quantile(V(red_pam50)$eigenvector, 0.90)
+
+hubs_pam50 <- data.frame(
+  Caracteristica = V(red_pam50)$name,
+  Grado = V(red_pam50)$degree,
+  Eigenvector = round(V(red_pam50)$eigenvector, 4),
+  Betweenness = round(V(red_pam50)$betweenness, 4),
+  Gateway = round(V(red_pam50)$gateway, 3),
+  Comunidad = V(red_pam50)$community
+) %>%
+  filter(Grado >= umbral_grado & Eigenvector >= umbral_eigen) %>%
+  arrange(desc(Grado))
+
+datatable(
+  hubs_pam50,
+  colnames = c("Característica", "Grado", "Eigenvector", "Betweenness", "Gateway", "Comunidad"),
+  options = list(
+    pageLength = 15,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Nodos Hub en red PAM50 - Alta centralidad y conectividad"
+) %>%
+  formatRound(c('Eigenvector', 'Betweenness', 'Gateway'), 4)
+```
+
+## Análisis de Supervivencia por Subtipo
+
+### Supervivencia por PAM50
+
+```{r survival_pam50}
+survival_pam50 <- datos_red %>%
+  filter(!is.na(PAM50) & !is.na(Survival)) %>%
+  group_by(PAM50, Survival) %>%
+  summarise(N = n(), .groups = "drop") %>%
+  group_by(PAM50) %>%
+  mutate(
+    Total = sum(N),
+    Porcentaje = round(N / Total * 100, 2)
+  ) %>%
+  pivot_wider(
+    id_cols = c(PAM50, Total),
+    names_from = Survival,
+    values_from = c(N, Porcentaje),
+    values_fill = 0
+  )
+
+datatable(
+  survival_pam50,
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Distribución de supervivencia por subtipo PAM50"
+) %>%
+  formatRound(grep("Porcentaje", names(survival_pam50)), 2)
+```
+
+### Recurrencia por Subtipo
+
+```{r recurrence_pam50}
+recurrence_pam50 <- datos_red %>%
+  filter(!is.na(PAM50) & !is.na(Relapse)) %>%
+  group_by(PAM50, Relapse) %>%
+  summarise(N = n(), .groups = "drop") %>%
+  group_by(PAM50) %>%
+  mutate(
+    Total = sum(N),
+    Porcentaje = round(N / Total * 100, 2)
+  ) %>%
+  pivot_wider(
+    id_cols = c(PAM50, Total),
+    names_from = Relapse,
+    values_from = c(N, Porcentaje),
+    values_fill = 0
+  )
+
+datatable(
+  recurrence_pam50,
+  options = list(
+    pageLength = 10,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
+  caption = "Tasa de recurrencia por subtipo PAM50"
+) %>%
+  formatRound(grep("Porcentaje", names(recurrence_pam50)), 2)
+```
+
+## Resumen Ejecutivo
+
+### Hallazgos Principales
+
+```{r resumen_hallazgos}
+hallazgos <- data.frame(
+  Aspecto = c(
+    "Subtipo PAM50 más frecuente",
+    "Característica más central (PAM50)",
+    "N° de comunidades (PAM50)",
+    "Densidad de red más alta",
+    "Característica hub principal",
+    "Gateway score más alto",
+    "K-core máximo (PAM50)",
+    "Modularidad promedio",
+    "Total de pacientes analizados"
+  ),
+  Hallazgo = c(
+    pam50_dist$Subtipo[1],
+    centralidad_pam50$Caracteristica[1],
+    as.character(metricas_pam50$Valor[6]),
+    comparacion$Red[which.max(comparacion$Densidad)],
+    hubs_pam50$Caracteristica[1],
+    gateway_pam50$Caracteristica[1],
+    as.character(max(kcore_pam50)),
+    as.character(round(mean(comparacion$Modularidad), 3)),
+    as.character(nrow(datos))
+  )
+)
+
+datatable(
+  hallazgos,
+  colnames = c("Aspecto Analizado", "Hallazgo Principal"),
+  options = list(
+    dom = 't',
+    pageLength = 10
+  ),
+  caption = "Resumen de hallazgos principales del análisis de redes"
+)
+```
+
+### Implicaciones Clínicas
+
+#### Características clave identificadas:
+
+1. **Nodos Hub**: Características que conectan múltiples aspectos del cáncer de mama
+   - Alto grado de conectividad
+   - Centralidad elevada en la red
+   - Potencialmente útiles para estratificación de pacientes
+
+2. **Nodos Puente (Gateway)**: Características que conectan diferentes comunidades
+   - Puente entre subtipos moleculares
+   - Relevantes para entender transiciones biológicas
+   - Posibles blancos terapéuticos
+
+3. **Comunidades detectadas**: Clusters de características que co-ocurren
+   - Patrones de tratamiento
+   - Asociaciones pronósticas
+   - Grupos de riesgo
+
+### Consideraciones para investigación futura:
+
+- Validación de patrones en cohortes independientes
+- Análisis de datos genómicos integrados
+- Estudio longitudinal de evolución de características
+- Desarrollo de modelos predictivos basados en redes
+
+## Información de Sesión
+
+```{r session_info}
+sessionInfo()
+```
+
+---
+
+**Nota**: Todas las figuras han sido guardadas en la carpeta `figuras_redes/` para su uso posterior.
