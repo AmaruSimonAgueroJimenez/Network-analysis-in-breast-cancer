@@ -1,8 +1,8 @@
 ---
-title: "Predictive-analysis-of-in-hospital-mortality-in-patients-with-ovarian-cancer"
+title: "Análisis de Redes en Cáncer de Mama"
 author:
-  - name: "Luna"
-    email: "n@miuandes.cl"
+  - name: "Luna Villalobos Araya"
+    email: "llvillalobos@miuandes.cl"
     orcid: "0000-0001-7336-1833"
   - name: "Amaru Simón Agüero Jiménez"
     email: "aaguero@miuandes.cl"
