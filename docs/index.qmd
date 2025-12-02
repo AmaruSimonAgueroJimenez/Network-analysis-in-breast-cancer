@@ -872,8 +872,10 @@ datatable(
   colnames = c("Métrica de Red", "Valor"),
   options = list(
     dom = 't',
-    pageLength = 10
+    pageLength = 10,
+    buttons = c('copy', 'csv', 'excel')
   ),
+  extensions = 'Buttons',
   caption = "Métricas topológicas de la red de características clínicas (PAM50)"
 )
 ```
@@ -1026,7 +1028,10 @@ metricas_3gene <- data.frame(
 datatable(
   metricas_3gene,
   colnames = c("Métrica de Red", "Valor"),
-  options = list(dom = 't'),
+  options = list(dom = 't'
+                 ,buttons = c('copy', 'csv', 'excel')
+  ),
+  extensions = 'Buttons',
   caption = "Métricas topológicas de la red 3-Gene Classifier"
 )
 ```
@@ -1429,8 +1434,10 @@ datatable(
   colnames = c("Subtipo", "N", "ER+ (%)", "PR+ (%)", "HER2+ (%)", 
                "Grado 3 (%)", "Estadio 2 (%)", "Quimio (%)", "Hormonal (%)", "Radio (%)"),
   options = list(
-    dom = 't'
+    dom = 't',
+    buttons = c('copy', 'csv', 'excel')
   ),
+  extensions = 'Buttons',
   caption = "Comparación de características entre subtipos Luminales A y B"
 ) %>%
   formatRound(3:10, 2)
@@ -1471,8 +1478,10 @@ datatable(
   colnames = c("Subtipo", "N", "Grado 3 (%)", "Estadio 3-4 (%)", 
                "Quimio (%)", "Radio (%)", "Fallecidos (%)", "Recurrencia (%)"),
   options = list(
-    dom = 't'
+    dom = 't',
+    buttons = c('copy', 'csv', 'excel')
   ),
+  extensions = 'Buttons',
   caption = "Comparación entre subtipos agresivos: Triple Negativo vs HER2+"
 ) %>%
   formatRound(3:8, 2)
@@ -1755,17 +1764,11 @@ datatable(
 - Estudio longitudinal de evolución de características
 - Desarrollo de modelos predictivos basados en redes
 
-## Información de Sesión
-
-```{r session_info}
-sessionInfo()
-```
-
 ---
 
 **Nota**: Todas las figuras han sido guardadas en la carpeta `figuras_redes/` para su uso posterior.
 
-# Resultados
+# Resultados descripción
 
 La investigación se sustentó en el conjunto de datos METABRIC, que reúne información de 2509 mujeres con cáncer de mama invasivo. Este cohorte fue analizado mediante diferentes clasificaciones moleculares (PAM50 + Claudin‑low, clasificador de 3 genes e Integrative Cluster) y variables clínicas como estado de receptores hormonales, grado y estadio tumoral, tratamientos recibidos y desenlaces. El primer paso consistió en caracterizar la distribución de subtipos moleculares; se observó que el subtipo **Luminal A** del sistema PAM50 predominó en el 35 % de los casos. Esta información, plasmada en la **Tabla 1**, evidencia la abundancia de tumores luminales A en la cohorte, los cuales suelen asociarse a mejor pronóstico y a la presencia de receptores hormonales positivos. De manera similar, la **Tabla 2** muestra que, según el clasificador de tres genes, la mayoría de los tumores correspondían a los subtipos **ER+/HER2‑** de baja y alta proliferación (36 % y 35 %, respectivamente), reforzando la idea de que los tumores luminales son los más frecuentes en la muestra. El sistema Integrative Cluster identificó once agrupaciones, siendo los clústeres 8 y 3 los más comunes, pero dada su complejidad se mencionan de forma complementaria sin profundizar en ellos.
 
