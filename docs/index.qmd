@@ -761,7 +761,7 @@ summary_clean <- datos_red %>%
 ```{r tabla_resumen_datos}
 datatable(
   summary_clean,
-  options = list(dom = 't'),
+  options = list(dom = "Bfrtip"),
   caption = "Disponibilidad de variables clave para análisis"
 )
 ```
@@ -871,7 +871,7 @@ datatable(
   metricas_pam50,
   colnames = c("Métrica de Red", "Valor"),
   options = list(
-    dom = 't',
+    dom = "Bfrtip",
     pageLength = 10,
     buttons = c('copy', 'csv', 'excel')
   ),
@@ -1028,7 +1028,7 @@ metricas_3gene <- data.frame(
 datatable(
   metricas_3gene,
   colnames = c("Métrica de Red", "Valor"),
-  options = list(dom = 't'
+  options = list(dom = "Bfrtip"
                  ,buttons = c('copy', 'csv', 'excel')
   ),
   extensions = 'Buttons',
@@ -1183,7 +1183,7 @@ metricas_intclust <- data.frame(
 datatable(
   metricas_intclust,
   colnames = c("Métrica de Red", "Valor"),
-  options = list(dom = 't'),
+  options = list(dom = "Bfrtip"),
   caption = "Métricas topológicas de la red Integrative Cluster"
 )
 ```
@@ -1266,7 +1266,7 @@ datatable(
   comparacion,
   colnames = c("Red", "Nodos", "Aristas", "Densidad", "Clustering", "Comunidades", "Modularidad"),
   options = list(
-    dom = 't',
+    dom = "Bfrtip",
     pageLength = 5
   ),
   caption = "Comparación de métricas topológicas entre las tres redes"
@@ -1434,7 +1434,7 @@ datatable(
   colnames = c("Subtipo", "N", "ER+ (%)", "PR+ (%)", "HER2+ (%)", 
                "Grado 3 (%)", "Estadio 2 (%)", "Quimio (%)", "Hormonal (%)", "Radio (%)"),
   options = list(
-    dom = 't',
+    dom = "Bfrtip",
     buttons = c('copy', 'csv', 'excel')
   ),
   extensions = 'Buttons',
@@ -1478,7 +1478,7 @@ datatable(
   colnames = c("Subtipo", "N", "Grado 3 (%)", "Estadio 3-4 (%)", 
                "Quimio (%)", "Radio (%)", "Fallecidos (%)", "Recurrencia (%)"),
   options = list(
-    dom = 't',
+    dom = "Bfrtip",
     buttons = c('copy', 'csv', 'excel')
   ),
   extensions = 'Buttons',
@@ -1731,7 +1731,7 @@ datatable(
   hallazgos,
   colnames = c("Aspecto Analizado", "Hallazgo Principal"),
   options = list(
-    dom = 't',
+    dom = "Bfrtip",
     pageLength = 10
   ),
   caption = "Resumen de hallazgos principales del análisis de redes"
